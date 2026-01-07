@@ -4887,12 +4887,9 @@
 
                     const clerk = await initClerk();
                     if (!clerk) {
-                        // Clerk failed to load - skip auth for testing
-                        console.warn("Clerk unavailable - entering test mode");
+                        // Clerk failed to load - show login screen anyway
+                        console.warn("Clerk unavailable - authentication may not work");
                         setAuthChecked(true);
-                        setAuthUser({ localTest: true });
-                        setUserEmail("daniel.davis@populationmatters.org");
-                        setCurrentUser("Dan Davis");
                         return;
                     }
 
