@@ -146,7 +146,12 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Clerk Authentication SDK -->
-    <script src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"></script>
+    <script
+        async
+        crossorigin="anonymous"
+        data-clerk-publishable-key="pk_test_cmVmaW5lZC13YWhvby00NC5jbGVyay5hY2NvdW50cy5kZXYk"
+        src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"
+    ></script>
     <!-- PDF Export Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -482,16 +487,39 @@
                 return null;
             }
 
-            // Check if Clerk SDK loaded
-            if (!window.Clerk || typeof window.Clerk !== 'function') {
-                console.warn("Clerk SDK not loaded. Authentication will be disabled.");
-                return null;
-            }
-
+            // Wait for Clerk to be ready (loaded via data-clerk-publishable-key attribute)
+            // Clerk auto-initializes when loaded this way
             try {
-                clerkInstance = new window.Clerk(AUTH_CONFIG.CLERK_PUBLISHABLE_KEY);
-                await clerkInstance.load();
-                return clerkInstance;
+                // Wait up to 5 seconds for Clerk to load
+                let attempts = 0;
+                while (!window.Clerk && attempts < 50) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    attempts++;
+                }
+
+                if (!window.Clerk) {
+                    console.warn("Clerk SDK not loaded. Authentication will be disabled.");
+                    return null;
+                }
+
+                // If Clerk is already loaded (as an object, not constructor), use it directly
+                if (typeof window.Clerk === 'object' && window.Clerk.load) {
+                    clerkInstance = window.Clerk;
+                    if (!clerkInstance.loaded) {
+                        await clerkInstance.load();
+                    }
+                    return clerkInstance;
+                }
+
+                // Fallback: Clerk might be a constructor (older versions)
+                if (typeof window.Clerk === 'function') {
+                    clerkInstance = new window.Clerk(AUTH_CONFIG.CLERK_PUBLISHABLE_KEY);
+                    await clerkInstance.load();
+                    return clerkInstance;
+                }
+
+                console.warn("Clerk SDK format not recognized.");
+                return null;
             } catch (e) {
                 console.error("Failed to initialize Clerk:", e);
                 return null;
