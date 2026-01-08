@@ -155,6 +155,8 @@
     <!-- PDF Export Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- Supabase SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
@@ -168,6 +170,25 @@
             // Set to true to enable authentication (set false for development)
             AUTH_ENABLED: true,
         };
+
+        // ============================================
+        // SUPABASE CONFIGURATION
+        // ============================================
+        const SUPABASE_CONFIG = {
+            // Get these from your Supabase project: Settings → API
+            SUPABASE_URL: "YOUR_SUPABASE_URL", // e.g., "https://xxxxx.supabase.co"
+            SUPABASE_ANON_KEY: "YOUR_SUPABASE_ANON_KEY", // The "anon" public key
+            ENABLED: false, // Set to true once you've added your Supabase credentials
+        };
+
+        // Initialize Supabase client
+        let supabase = null;
+        if (SUPABASE_CONFIG.ENABLED && SUPABASE_CONFIG.SUPABASE_URL !== "YOUR_SUPABASE_URL") {
+            supabase = window.supabase.createClient(
+                SUPABASE_CONFIG.SUPABASE_URL,
+                SUPABASE_CONFIG.SUPABASE_ANON_KEY
+            );
+        }
 
         // ============================================
         // USER ROLES & PRE-SEEDED PROFILES
@@ -470,6 +491,140 @@
                 const d = await r.json();
                 return d.d?.results || [];
             }
+        };
+
+        // --- SUPABASE API CONNECTOR ---
+        const SUPABASE_API = {
+            // 1. Fetch all workflow items
+            fetchWorkflowItems: async () => {
+                if (!supabase) return [];
+                const { data, error } = await supabase
+                    .from('workflow_items')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+                if (error) {
+                    console.error('Supabase fetch error:', error);
+                    return [];
+                }
+                return data || [];
+            },
+
+            // 2. Save new workflow item
+            saveItem: async (item) => {
+                if (!supabase) return null;
+                const { data, error } = await supabase
+                    .from('workflow_items')
+                    .insert([{
+                        title: item.title,
+                        caption: item.caption || '',
+                        workflow_status: item.workflowStatus || 'Idea',
+                        team: item.team || '',
+                        timeline_value: item.timelineValue || '',
+                        owner: item.owner || '',
+                        collaborators: item.collaborators || [],
+                        tags: item.tags || [],
+                        subtasks: item.subtasks || [],
+                        documents: item.documents || [],
+                        date: item.date || null,
+                        comments: item.comments || []
+                    }])
+                    .select()
+                    .single();
+                if (error) {
+                    console.error('Supabase save error:', error);
+                    return null;
+                }
+                return data;
+            },
+
+            // 3. Update existing workflow item
+            updateItem: async (id, updates) => {
+                if (!supabase) return null;
+                const { data, error } = await supabase
+                    .from('workflow_items')
+                    .update({
+                        title: updates.title,
+                        caption: updates.caption,
+                        workflow_status: updates.workflowStatus,
+                        team: updates.team,
+                        timeline_value: updates.timelineValue,
+                        owner: updates.owner,
+                        collaborators: updates.collaborators || [],
+                        tags: updates.tags || [],
+                        subtasks: updates.subtasks || [],
+                        documents: updates.documents || [],
+                        date: updates.date || null,
+                        comments: updates.comments || [],
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', id)
+                    .select()
+                    .single();
+                if (error) {
+                    console.error('Supabase update error:', error);
+                    return null;
+                }
+                return data;
+            },
+
+            // 4. Delete workflow item
+            deleteItem: async (id) => {
+                if (!supabase) return false;
+                const { error } = await supabase
+                    .from('workflow_items')
+                    .delete()
+                    .eq('id', id);
+                if (error) {
+                    console.error('Supabase delete error:', error);
+                    return false;
+                }
+                return true;
+            },
+
+            // 5. Fetch managers
+            fetchManagers: async () => {
+                if (!supabase) return [];
+                const { data, error } = await supabase
+                    .from('managers')
+                    .select('*');
+                if (error) {
+                    console.error('Supabase managers fetch error:', error);
+                    return [];
+                }
+                return data || [];
+            },
+
+            // 6. Subscribe to real-time changes
+            subscribeToChanges: (callback) => {
+                if (!supabase) return null;
+                return supabase
+                    .channel('workflow_changes')
+                    .on('postgres_changes',
+                        { event: '*', schema: 'public', table: 'workflow_items' },
+                        (payload) => {
+                            console.log('Real-time update:', payload);
+                            callback(payload);
+                        }
+                    )
+                    .subscribe();
+            },
+
+            // Helper: Convert Supabase row to app format
+            mapToAppFormat: (row) => ({
+                id: row.id,
+                title: row.title,
+                caption: row.caption,
+                workflowStatus: row.workflow_status,
+                team: row.team,
+                timelineValue: row.timeline_value,
+                owner: row.owner,
+                collaborators: row.collaborators || [],
+                tags: row.tags || [],
+                subtasks: row.subtasks || [],
+                documents: row.documents || [],
+                date: row.date,
+                comments: row.comments || []
+            })
         };
 
         // ============================================
@@ -5104,6 +5259,49 @@
                         return;
                     }
 
+                    // ===== SUPABASE MODE =====
+                    if (SUPABASE_CONFIG.ENABLED && supabase) {
+                        console.log("Loading data from Supabase...");
+
+                        // 1. Load workflow items
+                        try {
+                            const items = await SUPABASE_API.fetchWorkflowItems();
+                            const mappedEntries = items.map(SUPABASE_API.mapToAppFormat);
+                            setEntries(mappedEntries);
+                            console.log(`Loaded ${mappedEntries.length} items from Supabase`);
+                        } catch (e) {
+                            console.error("Could not load from Supabase:", e);
+                        }
+
+                        // 2. Load managers (or use defaults)
+                        try {
+                            const mgrItems = await SUPABASE_API.fetchManagers();
+                            if (mgrItems.length) {
+                                const mappedManagers = mgrItems.map(m => ({
+                                    name: m.name,
+                                    email: m.email,
+                                    team: m.team,
+                                    reports: m.reports || []
+                                }));
+                                setManagers(mappedManagers);
+                            }
+                        } catch (e) {
+                            console.warn("Could not load managers from Supabase; using defaults", e);
+                        }
+
+                        // 3. Subscribe to real-time updates
+                        const subscription = SUPABASE_API.subscribeToChanges((payload) => {
+                            // Refresh data on any change
+                            SUPABASE_API.fetchWorkflowItems().then(items => {
+                                setEntries(items.map(SUPABASE_API.mapToAppFormat));
+                            });
+                        });
+
+                        setLoading(false);
+                        return;
+                    }
+
+                    // ===== SHAREPOINT MODE =====
                     // 1. Get User (from SharePoint if auth not enabled, otherwise from Clerk)
                     if (!AUTH_CONFIG.AUTH_ENABLED) {
                         const user = await SP_API.getCurrentUser();
@@ -5182,9 +5380,16 @@
             const [statsModalTitle, setStatsModalTitle] = useState('');
             const [statsModalItems, setStatsModalItems] = useState([]);
 
-            // Persist an entry back to SharePoint, packing extra data into JSON_Data
-            const persistEntryToSharePoint = async (entry) => {
+            // Persist an entry back to the database (Supabase or SharePoint)
+            const persistEntry = async (entry) => {
                 try {
+                    // Use Supabase if enabled
+                    if (SUPABASE_CONFIG.ENABLED && supabase) {
+                        await SUPABASE_API.updateItem(entry.id, entry);
+                        return;
+                    }
+
+                    // Fall back to SharePoint
                     const {
                         id,
                         title,
@@ -5211,7 +5416,7 @@
                     };
                     await SP_API.updateItem('WorkflowItems', id, payload);
                 } catch (e) {
-                    console.error("Failed to persist entry to SharePoint", e);
+                    console.error("Failed to persist entry:", e);
                 }
             };
 
@@ -5246,7 +5451,7 @@
                     })
                 );
                 if (updatedEntry) {
-                    persistEntryToSharePoint(updatedEntry);
+                    persistEntry(updatedEntry);
                 }
             };
 
@@ -5327,10 +5532,23 @@
                 setSaveError("");
 
                 try {
-                    // 1. Separate standard columns from complex data
-                    const { title, caption, workflowStatus, team, timelineValue, ...complexData } = newItem;
+                    // Use Supabase if enabled
+                    if (SUPABASE_CONFIG.ENABLED && supabase) {
+                        const saved = await SUPABASE_API.saveItem({
+                            ...newItem,
+                            workflowStatus: newItem.workflowStatus || "Idea"
+                        });
+                        if (saved) {
+                            // Add to local state
+                            setEntries(prev => [SUPABASE_API.mapToAppFormat(saved), ...prev]);
+                            setCurrentView('dashboard');
+                        }
+                        setSaving(false);
+                        return;
+                    }
 
-                    // 2. Send to SharePoint
+                    // Fall back to SharePoint
+                    const { title, caption, workflowStatus, team, timelineValue, ...complexData } = newItem;
                     const payload = {
                         __metadata: { "type": "SP.Data.WorkflowItemsListItem" },
                         Title: title,
@@ -5342,8 +5560,6 @@
                     };
 
                     await SP_API.saveItem('WorkflowItems', payload);
-
-                    // 3. Refresh Page to see new item (after save completes)
                     window.location.reload();
                 } catch (error) {
                     console.error("Failed to save item:", error);
@@ -5356,11 +5572,18 @@
                 // 1. Optimistic Update (Instant UI change)
                 setEntries(entries.map(e => e.id === id ? { ...e, workflowStatus: newStatus } : e));
 
-                // 2. Send to SharePoint
-                await SP_API.updateItem('WorkflowItems', id, {
-                    __metadata: { "type": "SP.Data.WorkflowItemsListItem" },
-                    workflowStatus: newStatus
-                });
+                // 2. Persist to database
+                if (SUPABASE_CONFIG.ENABLED && supabase) {
+                    const entry = entries.find(e => e.id === id);
+                    if (entry) {
+                        await SUPABASE_API.updateItem(id, { ...entry, workflowStatus: newStatus });
+                    }
+                } else {
+                    await SP_API.updateItem('WorkflowItems', id, {
+                        __metadata: { "type": "SP.Data.WorkflowItemsListItem" },
+                        workflowStatus: newStatus
+                    });
+                }
             };
 
             const handleOpenEntry = (id) => {
