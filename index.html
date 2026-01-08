@@ -1271,11 +1271,19 @@
         const inputBaseClasses =
             "w-full rounded-lg border border-graystone-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-ocean-500 focus:outline-none focus:ring-2 focus:ring-aqua-200";
 
-        function ManagerHub({ managers = [], teams = [], entries = [], currentUser, openStatsModal, onOpen, onUpdateStatus, openSubtaskModal }) {
+        function ManagerHub({ managers = [], teams = [], entries = [], currentUser, userEmail, openStatsModal, onOpen, onUpdateStatus, openSubtaskModal }) {
             const normalizedTeams = teams.length ? teams : TEAMS;
-            const [selectedManager, setSelectedManager] = useState(managers[0] || null);
+
+            // Filter to only show the logged-in manager's own hub (or all if admin)
+            const myManagerRecord = managers.find(m => m.email?.toLowerCase() === userEmail?.toLowerCase());
+            const isAdminUser = isAdmin(userEmail);
+
+            // If admin, can see all managers; otherwise only see own team
+            const availableManagers = isAdminUser ? managers : (myManagerRecord ? [myManagerRecord] : []);
+
+            const [selectedManager, setSelectedManager] = useState(myManagerRecord || managers[0] || null);
             const [selectedReport, setSelectedReport] = useState("all");
-            const [selectedMembers, setSelectedMembers] = useState(managers[0]?.reports || []);
+            const [selectedMembers, setSelectedMembers] = useState((myManagerRecord || managers[0])?.reports || []);
             const [includeCollaborations, setIncludeCollaborations] = useState(false);
             const [managerViewMode, setManagerViewMode] = useState('kanban');
 
@@ -1524,14 +1532,14 @@
                             </div>
                         </div>
                     </div>
-                    {managers.length > 1 && (
+                    {availableManagers.length > 1 && (
                         <div className="flex justify-end">
                             <select
-                                value={selectedManager?.email || managers[0]?.email || ""}
+                                value={selectedManager?.email || availableManagers[0]?.email || ""}
                                 onChange={(e) => handleManagerChange(e.target.value)}
                                 className={cx(selectBaseClasses, "w-full max-w-xs")}
                             >
-                                {managers.map((mgr) => (
+                                {availableManagers.map((mgr) => (
                                     <option key={mgr.email} value={mgr.email}>{mgr.name} — {mgr.team}</option>
                                 ))}
                             </select>
@@ -5441,7 +5449,7 @@
                                 </div>
                             );
                         }
-                        return <ManagerHub managers={managers} teams={TEAMS} entries={entries} currentUser={currentUser} openStatsModal={openStatsModal} onOpen={handleOpenEntry} onUpdateStatus={handleUpdateStatus} openSubtaskModal={openSubtaskModal} />;
+                        return <ManagerHub managers={managers} teams={TEAMS} entries={entries} currentUser={currentUser} userEmail={userEmail} openStatsModal={openStatsModal} onOpen={handleOpenEntry} onUpdateStatus={handleUpdateStatus} openSubtaskModal={openSubtaskModal} />;
 
                     case 'personal': {
                         const myOwnedEntries = entries.filter(e => e.owner === currentUser);
